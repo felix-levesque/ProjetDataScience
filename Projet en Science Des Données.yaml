@@ -1,0 +1,1362 @@
+schemaVersion: 3
+meta:
+  sourceVersionId: 019c060d-3951-7ee7-9feb-e5fb60a06ba5 # DO NOT CHANGE - Hex uses this to match up project versions when reimporting the file
+  description: Analyse prédictive des volumes d’incidents
+  projectId: 019afff5-b703-7001-8d53-f953a0b97601 # DO NOT CHANGE - Unique ID of the project from which this file was generated
+  title: Projet en Science Des Données
+  timezone: null
+  appTheme: SYS_PREF
+  codeLanguage: PYTHON
+  status: null
+  categories: []
+  castDecimalsDefault: true
+  hexType: PROJECT
+  allowExecutionReordering: true
+  prerunApp: false
+  autoRerunApp: true
+  cachePublishedAppState: true
+  logicQueryCacheTimeout: null
+  publishedQueryCacheTimeout: null
+  refreshStalePublishedApp: true
+projectAssets:
+  dataConnections: []
+  envVars: []
+  secrets: []
+sharedAssets:
+  secrets: []
+  vcsPackages: []
+  dataConnections:
+    - dataConnectionId: cb7c9e65-eae5-4726-adf8-4e34ed99b21f # [Demo] Hex Public Data (snowflake)
+  externalFileIntegrations: []
+cells:
+  - cellType: INPUT
+    cellId: 019bfcc0-d475-700f-87b7-75b2e66c8641 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Sélectionner les départements
+    config:
+      inputType: MULTISELECT
+      name: selected_departments
+      outputType: LIST_STRING
+      options:
+        multiValueOptions:
+          - Strategy
+          - Logistics
+          - Purchasing
+          - MIS
+          - Marketing
+          - Supply Chain Management
+          - Operations
+          - Finance
+          - Engineering
+          - IT
+          - Legal
+          - Quality Assurance
+          - Sales
+          - HR
+          - Global
+          - Customer Service
+          - Innovation & R&D
+          - Manufacturing
+          - Regulatory Affairs & Compliance
+      defaultValue:
+        - Finance
+        - IT
+        - HR
+  - cellType: INPUT
+    cellId: 019bfcc4-ae7d-700b-b49c-9a4c72599978 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Période de prévision
+    config:
+      inputType: DATE
+      name: forecast_date_range
+      outputType: DATETIME
+      options:
+        enableTime: false
+        showRelativeDates: true
+        useDateRange: true
+        enableTimezonePicker: false
+      defaultValue:
+        - dateString: 2026-01-01
+        - dateString: 2026-02-28
+  - cellType: INPUT
+    cellId: 019bfcc8-8c3c-7118-99cb-d5341fc0147a # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Seuil de capacité (tickets/mois)
+    config:
+      inputType: NUMERIC_INPUT
+      name: capacity_threshold
+      outputType: NUMBER
+      options:
+        increment: 1
+        numberFormatting:
+          format: NUMBER
+          thousands: true
+      defaultValue: "10"
+  - cellType: CODE
+    cellId: 019afffb-c226-7113-a648-509c856d2616 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        # Cell 1 - Collecte de données
+
+        import pandas as pd
+        df = pd.read_csv('Data_Projet_En_Science_Des_Données.csv')
+  - cellType: CODE
+    cellId: 019b049a-6413-7995-8116-b8e74b4850be # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        # Cell 2 — Fiabiliser & normaliser
+        import pandas as pd
+        import numpy as np
+        import re
+
+        # 1) Renommer les colonnes (harmonisation)
+        rename_map = {
+            'Assigned to':'assigned_to',
+            'Assignment group':'assignment_group',
+            'Closed':'closed',
+            'CountofNoTimeWorked':'count_no_time_worked',
+            'Created':'created',
+            'Department':'department',
+            'Estimation time':'estimation_time',
+            'Incident':'incident',
+            'Number':'number',
+            'Open by':'opened_by',
+            'Parent':'parent',
+            'Priority':'priority',
+            'Request':'request',
+            'Resolved':'resolved',
+            'Short description':'short_description',
+            'State':'state',
+            'Time worked (min)':'time_worked_min',
+            'Task type':'task_type',
+            'Total Hours ':'total_hours_raw',
+            'Total Hours':'total_hours_raw'
+        }
+        df = df.rename(columns=rename_map)
+
+        # 2) Types & dates
+        for col in ['created','resolved','closed']:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+
+        # 3) Normaliser catégories
+        # 3.1 task_type
+        if 'task_type' in df.columns:
+            df['task_type'] = (
+                df['task_type'].astype(str).str.strip().str.lower()
+                .replace({'requested item':'requested_item',
+                          'catalog task':'catalog_task',
+                          'change request':'change_request',
+                          'incident':'incident'})
+            )
+
+        # 3.2 priority -> level + label (FR)
+        def split_priority(value):
+            if pd.isna(value): return np.nan, np.nan
+            s = str(value)
+            m = re.match(r"\s*(\d+)\s*[-–]?\s*(.*)", s)
+            if m:
+                lvl = int(m.group(1))
+                label = (m.group(2) or '').strip() or np.nan
+            else:
+                nums = re.findall(r"\d+", s)
+                lvl = int(nums[0]) if nums else np.nan
+                label = re.sub(r"[\d-–]", "", s).strip() or np.nan
+            return lvl, label
+
+        if 'priority' in df.columns:
+            plv, plb = zip(*df['priority'].map(split_priority))
+            df['priority_level'] = plv
+            df['priority_label'] = pd.Series(plb).replace({
+                'Low':'Faible','Moderate':'Modérée','High':'Élevée','Critical':'Critique'
+            })
+            df.loc[(~pd.isna(df['priority_level'])) & (~df['priority_level'].between(1,5)), 'priority_level'] = np.nan
+
+        # 3.3 state normalisé
+        state_norm_map = {
+            'Closed Complete':'closed_complete',
+            'Closed Incomplete':'closed_incomplete',
+            'Closed Skipped':'closed_skipped',
+            'Closed':'closed',
+            'Canceled':'canceled',
+            'Cancel':'canceled'
+        }
+        if 'state' in df.columns:
+            df['state_normalized'] = df['state'].map(state_norm_map).fillna(df['state'].astype(str).str.lower())
+
+        # 3.4 department — trim
+        if 'department' in df.columns:
+            df['department'] = df['department'].astype(str).str.strip()
+
+        # 4) Durées : estimation & total & KPI TTR/TTC
+        def parse_duration_to_minutes(x):
+            if pd.isna(x): return np.nan
+            s = str(x).strip().lower()
+            if s in ('', 'nan','none'): return np.nan
+            if re.match(r'^\d{1,2}:\d{2}$', s):
+                h, m = s.split(':'); return int(h)*60 + int(m)
+            m = re.match(r'^(\d+\.?\d*)\s*(h|hr|hrs|hour|hours|heure|heures)$', s)
+            if m: return float(m.group(1))*60
+            m = re.match(r'^(\d+\.?\d*)\s*(m|min|mins|minute|minutes)$', s)
+            if m: return float(m.group(1))
+            m = re.match(r'^(\d+\.?\d*)(hr|h)$', s)
+            if m: return float(m.group(1))*60
+            if re.match(r'^\d+(\.\d+)?$', s): return float(s)
+            return np.nan
+
+        def parse_total_hours(x):
+            if pd.isna(x): return np.nan
+            s = str(x).strip().lower()
+            if s in ('','nan'): return np.nan
+            if re.match(r'^\d{1,2}:\d{2}$', s):
+                h, m = s.split(':'); return int(h)*60 + int(m)
+            if re.match(r'^\d+(\.\d+)?$', s): return float(s)*60
+            return np.nan
+
+        if 'estimation_time' in df.columns:
+            df['estimation_minutes'] = df['estimation_time'].map(parse_duration_to_minutes)
+        if 'time_worked_min' in df.columns:
+            df['time_worked_min'] = pd.to_numeric(df['time_worked_min'], errors='coerce')
+        if 'total_hours_raw' in df.columns:
+            df['total_minutes'] = df['total_hours_raw'].map(parse_total_hours)
+
+        if 'created' in df.columns:
+            if 'resolved' in df.columns:
+                df['ttr_hours'] = (df['resolved'] - df['created']).dt.total_seconds()/3600.0
+            if 'closed' in df.columns:
+                df['ttc_hours'] = (df['closed'] - df['created']).dt.total_seconds()/3600.0
+
+        for c in ['ttr_hours','ttc_hours']:
+            if c in df.columns:
+                df.loc[df[c] < 0, c] = np.nan  # valeurs incohérentes
+
+        # 5) Doublons — dédupliquer par "number" (garder la version la plus récente)
+        if 'number' in df.columns:
+            if 'created' in df.columns:
+                       df = (df.sort_values(['number','created'])
+                        .drop_duplicates(subset=['number'], keep='last'))
+            else:
+                df = df.drop_duplicates(subset=['number'], keep='last')
+
+        print("Nettoyage OK — lignes:", len(df))
+  - cellType: CODE
+    cellId: 019b049a-9b4e-7995-8117-c90d5428e8e8 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        # Cell 3 — Filtrer incidents
+        import pandas as pd
+
+        # Normaliser la colonne task_type si nécessaire (sécurité)
+        if 'task_type' in df.columns:
+            df['task_type'] = df['task_type'].astype(str).str.strip().str.lower()
+
+        mask_incident_type = (df['task_type'] == 'incident') if 'task_type' in df.columns else True
+        mask_incident_num  = df['number'].astype(str).str.startswith('INC', na=False) if 'number' in df.columns else True
+
+        df_inc = df[mask_incident_type & mask_incident_num].copy()
+
+        # Assurer le type de date (création) — utilisé pour la suite
+        df_inc['created'] = pd.to_datetime(df_inc['created'], errors='coerce')
+
+        print("Incidents retenus:", len(df_inc))
+        df
+  - cellType: CODE
+    cellId: 019b049a-e466-7995-8118-d87c9beae43a # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        # Cell 4 — Incidents mensuels par département (freq MS)
+        import pandas as pd
+
+        # Fonction utilitaire : agrège en mensuel, force la fréquence 'MS' et comble les trous
+        def _to_monthly_series(g: pd.DataFrame) -> pd.Series:
+            s = (
+                g.set_index('created')
+                 .resample('MS')['n']        # 'MS' = Month Start
+                 .sum()
+                 .rename('incidents')
+            )
+            s = s.asfreq('MS', fill_value=0)  # fréquence explicite + trous -> 0
+            return s
+
+        dept_month = (
+            df_inc[['department', 'created']]
+              .assign(n=1)
+              .groupby('department', group_keys=True)
+              .apply(_to_monthly_series)
+        )
+
+        print("Nombre de départements (incidents):", dept_month.index.get_level_values(0).nunique())
+        any_dept = dept_month.index.get_level_values(0)[0]
+        print(f"Aperçu pour '{any_dept}':\n", dept_month.loc[any_dept].head())
+  - cellType: CODE
+    cellId: 019b049b-169c-7995-811a-0798bb1e0afb # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |+
+        # Cell 5 — Prévision 24 mois par département (robuste, sans backtest)
+        import numpy as np
+        import pandas as pd
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+        # Paramètres
+        seasonal_mode    = 'add'     # 'add' ou 'mul'
+        seasonal_periods = 12        # mensuel -> saison annuelle
+        min_points       = 12        # au moins 12 points pour tenter Holt
+        horizon_months   = 24
+
+        rows_forecast = []
+        eligible_departments = []
+        skipped_departments  = []
+
+        for dept in dept_month.index.get_level_values(0).unique():
+            s = dept_month.loc[dept]
+            if getattr(s.index, 'freq', None) is None:
+                s = s.asfreq('MS', fill_value=0)
+
+            n_points = int(len(s.dropna()))
+            if n_points < min_points:
+                skipped_departments.append((dept, n_points, "not_enough_history"))
+                continue
+
+            try:
+                # Avec saisonnalité si >= 24 points (2 cycles), sinon Holt (trend seul)
+                if n_points >= 2 * seasonal_periods:
+                    mdl = ExponentialSmoothing(
+                        s, trend='add', seasonal=seasonal_mode,
+                        seasonal_periods=seasonal_periods,
+                        initialization_method='estimated'
+                    ).fit(optimized=True)
+                else:
+                    mdl = ExponentialSmoothing(
+                        s, trend='add', seasonal=None,
+                        initialization_method='estimated'
+                    ).fit(optimized=True)
+
+                pred_24 = mdl.forecast(horizon_months)
+                
+                # Try to get prediction intervals (80% confidence)
+                try:
+                    pred_intervals = mdl.get_prediction(start=len(s), end=len(s) + horizon_months - 1).summary_frame(alpha=0.20)
+                    has_intervals = True
+                except:
+                    has_intervals = False
+                
+                for i, (dt, val) in enumerate(pred_24.items()):
+                    row_data = {
+                        'department': dept,
+                        'date': pd.to_datetime(dt),
+                        'incidents_forecast': float(val),
+                        'incidents_forecast_rounded': int(np.round(val))
+                    }
+                    if has_intervals:
+                        row_data['lower_bound'] = float(pred_intervals.iloc[i]['mean_ci_lower'])
+                        row_data['upper_bound'] = float(pred_intervals.iloc[i]['mean_ci_upper'])
+                    else:
+                        # Simple ±20% bands if prediction intervals fail
+                        row_data['lower_bound'] = max(0, float(val * 0.8))
+                        row_data['upper_bound'] = float(val * 1.2)
+                    
+                    rows_forecast.append(row_data)
+                eligible_departments.append(dept)
+
+            except Exception as e:
+                print(f"[WARN] Forecast échoué pour '{dept}': {e}")
+                skipped_departments.append((dept, n_points, f"error: {e}"))
+
+        forecast_24m_dept = (
+            pd.DataFrame(rows_forecast)
+              .sort_values(['department', 'date'])
+              .reset_index(drop=True)
+        )
+        forecast_24m_dept['period_label'] = forecast_24m_dept['date'].dt.strftime('%Y-%m')
+
+        print("Départements inclus (forecast):", len(eligible_departments))
+        print("Liste:", sorted(eligible_departments))
+        if skipped_departments:
+            print("\nDépartements ignorés/erreur:")
+            for d, n, reason in skipped_departments:
+                print(f" - {d}: points={n}, reason={reason}")
+
+  - cellType: CODE
+    cellId: 019bfcc2-0642-700d-84e5-5a26e7eeec3f # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Filter forecast by departments
+    config:
+      source: |-
+        import pandas as pd
+
+        # Filter by department
+        mask_dept = forecast_24m_dept['department'].isin(selected_departments)
+
+        # Filter by date range if provided
+        if forecast_date_range_start is not None and forecast_date_range_end is not None:
+            mask_date = (forecast_24m_dept['date'] >= pd.to_datetime(forecast_date_range_start)) & \
+                        (forecast_24m_dept['date'] <= pd.to_datetime(forecast_date_range_end))
+            filtered_forecast = forecast_24m_dept[mask_dept & mask_date].copy()
+        else:
+            filtered_forecast = forecast_24m_dept[mask_dept].copy()
+  - cellType: CODE
+    cellId: 019bfcc6-03cd-700d-868b-d7bfff5af4f4 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Calculate KPIs
+    config:
+      source: |-
+        # KPI calculations from filtered forecast
+        total_forecast = filtered_forecast['incidents_forecast_rounded'].sum()
+        avg_monthly = filtered_forecast['incidents_forecast_rounded'].mean()
+  - cellType: CODE
+    cellId: 019bfcc6-bb43-700c-ba83-a702851ec169 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Department comparison table
+    config:
+      source: |-
+        # Department comparison table
+        dept_summary = filtered_forecast.groupby('department').agg({
+            'incidents_forecast_rounded': 'sum'
+        }).reset_index()
+        dept_summary.columns = ['Département', 'Total prévisions']
+        dept_summary = dept_summary.sort_values('Total prévisions', ascending=False)
+
+        # Add peak month for each department
+        dept_peaks = []
+        for dept in dept_summary['Département']:
+            dept_data = filtered_forecast[filtered_forecast['department'] == dept]
+            if len(dept_data) > 0:
+                peak_idx = dept_data['incidents_forecast_rounded'].idxmax()
+                peak_month = dept_data.loc[peak_idx, 'date'].strftime('%b %Y')
+                dept_peaks.append(peak_month)
+            else:
+                dept_peaks.append('N/A')
+
+        dept_summary['Mois de pointe'] = dept_peaks
+        dept_comparison = dept_summary
+  - cellType: EXPLORE
+    cellId: 019bfcca-7938-700a-b71f-0021310ff5b2 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Comparaison par département
+    config:
+      semanticProjectId: null
+      dataframe: dept_comparison
+      colorMappings: {}
+      spec:
+        fields:
+          - id: 019bfcca-7924-700a-b71e-a6fc843c0c61
+            sort:
+              mode: cross-axis-descending
+            value: Département
+            channel: base-axis
+            dataType: VARCHAR
+            seriesId: 019bfcca-7922-700a-b71e-9f3208450729
+            fieldType: DIMENSION
+            queryPath: []
+          - id: 019bfcca-7925-700a-b71e-af034037ec8a
+            value: Total prévisions
+            channel: cross-axis
+            dataType: FLOAT
+            seriesId: 019bfcca-7922-700a-b71e-9f3208450729
+            fieldType: DIMENSION
+            queryPath: []
+            aggregation: Sum
+          - id: 019bfcca-7925-700a-b71e-b77c095c62c9
+            value: Mois de pointe
+            channel: tooltip
+            dataType: VARCHAR
+            seriesId: 019bfcca-7922-700a-b71e-9f3208450729
+            fieldType: DIMENSION
+            queryPath: []
+        details:
+          fields:
+            - value: Département
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+            - value: Total prévisions
+              dataType: FLOAT
+              fieldType: DIMENSION
+              queryPath: []
+            - value: Mois de pointe
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+          enabled: false
+          showAllBaseTableDetailFields: true
+        viewType: visualization
+        rowTotals: true
+        chartConfig:
+          series:
+            - id: 019bfcca-7922-700a-b71e-9f3208450729
+              type: bar
+              barGrouped: false
+          settings:
+            legend:
+              position: right
+          orientation: horizontal
+          seriesGroups:
+            - - 019bfcca-7922-700a-b71e-9f3208450729
+        columnTotals: true
+        visualizationType: chart
+      displayTableConfig:
+        pageSize: 50
+        height: null
+        hideIcons: false
+        defaultColumnWidth: null
+        hideIndex: false
+        defaultSortColumn: null
+        defaultSortIndexColumn: null
+        defaultSortDirection: ASC
+        conditionalFormatting: null
+        calcs: null
+        filters: null
+        columnProperties: []
+        columnOrdering: null
+        customColumnOrdering: null
+        pinnedColumns: null
+        hiddenColumns: null
+        pinIndexColumns: false
+        showAggregations: false
+        columnAggregations: null
+      resultVariables: []
+      resultIncludeDetailColumns: false
+      height: null
+  - cellType: METRIC
+    cellId: 019bfcc6-a4b1-766e-8cc1-58008a14cb0c # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Avg Monthly KPI
+    config:
+      title: Moyenne mensuelle
+      valueVariableName: avg_monthly
+      showComparison: false
+      comparisonType: VALUE
+      comparisonVariableName: null
+      comparisonFormat: POSITIVE_NEGATIVE
+      comparisonLabel: ""
+      displayFormat:
+        format: NUMBER
+        currency: USD
+        nanFormat: N/A
+        columnType: NUMBER
+        showSeparators: true
+        numDecimalDigits: 1
+        abbreviateLargeNumbers: false
+      valueColumn: null
+      valueRowIndex: null
+      valueAggregate: null
+      comparisonColumn: null
+      comparisonRowIndex: null
+      comparisonAggregate: null
+      valueResultVariable: null
+      comparisonResultVariable: null
+      outputResult: false
+  - cellType: METRIC
+    cellId: 019bfcc6-9f3b-7ccf-9b82-3eafc61a4d97 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Total Forecast KPI
+    config:
+      title: Total tickets prévus
+      valueVariableName: total_forecast
+      showComparison: false
+      comparisonType: VALUE
+      comparisonVariableName: null
+      comparisonFormat: POSITIVE_NEGATIVE
+      comparisonLabel: ""
+      displayFormat:
+        format: NUMBER
+        currency: USD
+        nanFormat: N/A
+        columnType: NUMBER
+        showSeparators: true
+        numDecimalDigits: 0
+        abbreviateLargeNumbers: true
+      valueColumn: null
+      valueRowIndex: null
+      valueAggregate: null
+      comparisonColumn: null
+      comparisonRowIndex: null
+      comparisonAggregate: null
+      valueResultVariable: null
+      comparisonResultVariable: null
+      outputResult: false
+  - cellType: CODE
+    cellId: 019b28aa-5141-7cca-a2f3-ff0866c7de70 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        
+        # Cell 6 — Plotly interactif : courbes par département (sans extrêmes)
+        import pandas as pd
+        import plotly.express as px
+
+        # Source : forecast_24m_dept (déjà construit en Cell 5)
+        df_plot = (
+            forecast_24m_dept
+              .copy()
+              .sort_values(['date','department'])
+        )
+
+        # Graphique multi-séries par département
+        fig = px.line(
+            df_plot,
+            x='date',
+            y='incidents_forecast_rounded',
+            color='department',
+            labels={'date': 'Mois (année)', 'incidents_forecast_rounded': 'Tickets (arrondi)'},
+            title='Projection des incidents (24 mois) — par département'
+        )
+
+        # Lignes fines, sans marqueurs
+        fig.update_traces(line=dict(width=1), mode='lines')
+
+        # Slider temporel pour naviguer
+        fig.update_xaxes(rangeslider_visible=True)
+
+        # Infobulle claire
+        fig.update_traces(
+            hovertemplate="<b>%{x|%Y-%m}</b><br>Dept: %{legendgroup}<br>Tickets: %{y}<extra></extra>"
+        )
+
+        # Mise en page lisible
+        fig.update_layout(
+            legend_title_text='Département',
+            hovermode='x unified',
+            margin=dict(l=30, r=20, t=60, b=40)
+        )
+
+        fig.show()
+
+        # (Option) Export CSV pour Power BI (format long, idéal pour un line chart multi-séries)
+        df_line_export = df_plot[['date','department','incidents_forecast_rounded']].rename(
+            columns={'incidents_forecast_rounded':'tickets_approx'}
+        )
+        df_line_export.to_csv('forecast_incidents_24m_par_dept.csv', index=False)
+        print("Export écrit : forecast_incidents_24m_par_dept.csv")
+  - cellType: EXPLORE
+    cellId: 019bfcc0-e78a-700c-b953-428dc0ca32c9 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Prévisions par département (24 mois)
+    config:
+      semanticProjectId: null
+      dataframe: filtered_forecast
+      colorMappings:
+        IT: "#F58518"
+        Finance: "#72B7B2"
+        Manufacturing: "#E45756"
+        Customer Service: "#4C78A8"
+      spec:
+        fields:
+          - id: 019bfcc0-e779-700c-b952-e19979400990
+            value: date
+            channel: base-axis
+            dataType: TIMESTAMP
+            seriesId: 019bfcc0-e778-700c-b952-d847ff1a180a
+            fieldType: DIMENSION
+            queryPath: []
+            truncUnit: month
+          - id: 019bfcc0-e77a-700c-b952-ef0414aa2731
+            value: incidents_forecast_rounded
+            channel: cross-axis
+            dataType: FLOAT
+            seriesId: 019bfcc0-e778-700c-b952-d847ff1a180a
+            fieldType: DIMENSION
+            queryPath: []
+            aggregation: Sum
+          - id: 019bfcc0-e77a-700c-b952-f5297d2af3d3
+            value: department
+            channel: color
+            dataType: VARCHAR
+            seriesId: 019bfcc0-e778-700c-b952-d847ff1a180a
+            fieldType: DIMENSION
+            queryPath: []
+        details:
+          fields:
+            - value: date
+              dataType: TIMESTAMP
+              fieldType: DIMENSION
+              queryPath: []
+            - value: incidents_forecast_rounded
+              dataType: FLOAT
+              fieldType: DIMENSION
+              queryPath: []
+            - value: department
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+          enabled: false
+          showAllBaseTableDetailFields: true
+        viewType: visualization
+        rowTotals: true
+        chartConfig:
+          series:
+            - id: 019bfcc0-e778-700c-b952-d847ff1a180a
+              type: line
+          settings:
+            legend:
+              position: right
+          orientation: vertical
+          seriesGroups:
+            - - 019bfcc0-e778-700c-b952-d847ff1a180a
+        columnTotals: true
+        visualizationType: chart
+      displayTableConfig:
+        pageSize: 50
+        height: null
+        hideIcons: false
+        defaultColumnWidth: null
+        hideIndex: false
+        defaultSortColumn: null
+        defaultSortIndexColumn: null
+        defaultSortDirection: ASC
+        conditionalFormatting: null
+        calcs: null
+        filters:
+          - column: date
+            fieldType: DIMENSION
+            predicate:
+              op: DATE_EQUAL_OR_AFTER
+              arg: 2026-01-01
+            queryPath: []
+            columnType: DATETIME
+        columnProperties: []
+        columnOrdering: null
+        customColumnOrdering: null
+        pinnedColumns: null
+        hiddenColumns: null
+        pinIndexColumns: false
+        showAggregations: false
+        columnAggregations: null
+      resultVariables: []
+      resultIncludeDetailColumns: false
+      height: null
+  - cellType: CODE
+    cellId: 019bfcc9-0e6f-7aa3-9d5a-35b0264bc0aa # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Forecast with confidence bands
+    config:
+      source: |-
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        # Get forecast data with confidence intervals from source
+        forecast_with_ci = forecast_24m_dept.merge(
+            filtered_forecast[['department', 'date']],
+            on=['department', 'date'],
+            how='inner'
+        )
+
+        fig = go.Figure()
+
+        # Plot forecast with confidence intervals for each department
+        for dept in forecast_with_ci['department'].unique():
+            dept_data = forecast_with_ci[forecast_with_ci['department'] == dept].sort_values('date')
+            
+            # Add the forecast line
+            fig.add_trace(go.Scatter(
+                x=dept_data['date'],
+                y=dept_data['incidents_forecast_rounded'],
+                name=dept,
+                mode='lines',
+                line=dict(width=2)
+            ))
+            
+            # Add confidence interval shading if columns exist
+            if 'upper_bound' in dept_data.columns and 'lower_bound' in dept_data.columns:
+                fig.add_trace(go.Scatter(
+                    x=dept_data['date'].tolist() + dept_data['date'].tolist()[::-1],
+                    y=dept_data['upper_bound'].tolist() + dept_data['lower_bound'].tolist()[::-1],
+                    fill='toself',
+                    fillcolor=fig.data[-1].line.color if hasattr(fig.data[-1].line, 'color') else 'rgba(128,128,128,0.1)',
+                    line=dict(color='rgba(255,255,255,0)'),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    opacity=0.15,
+                    name=f'{dept} IC'
+                ))
+
+        # Add capacity threshold line if set
+        if capacity_threshold and capacity_threshold > 0:
+            fig.add_hline(y=capacity_threshold, line_dash="dash", line_color="red", 
+                          annotation_text=f"Capacité: {capacity_threshold}", 
+                          annotation_position="right")
+
+        fig.update_layout(
+            title="Prévisions par département avec intervalles de confiance (80%)",
+            xaxis_title="Date",
+            yaxis_title="Nombre de tickets",
+            hovermode='x unified',
+            height=500
+        )
+
+        fig.show()
+  - cellType: CODE
+    cellId: 019bfccb-f324-700d-82fb-f3698934cbaa # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Historical vs Forecast overlay
+    config:
+      source: |-
+        import plotly.graph_objects as go
+        import pandas as pd
+
+        # Prepare historical data from dept_month
+        historical_data = []
+        for dept in dept_month.index.get_level_values(0).unique():
+            dept_series = dept_month.loc[dept]
+            for date_val, count in dept_series.items():
+                historical_data.append({
+                    'department': dept,
+                    'date': pd.to_datetime(date_val),
+                    'actual_incidents': int(count)
+                })
+
+        hist_df = pd.DataFrame(historical_data)
+
+        # Filter to selected departments
+        hist_filtered = hist_df[hist_df['department'].isin(selected_departments)]
+
+        # Merge with forecast to show transition
+        # Get forecasts starting from most recent historical date
+        latest_hist_date = hist_filtered['date'].max()
+        transition_forecast = forecast_with_ci[forecast_with_ci['date'] > latest_hist_date]
+
+        # Create combined viz
+        fig = go.Figure()
+
+        for dept in selected_departments:
+            # Historical actual
+            dept_hist = hist_filtered[hist_filtered['department'] == dept].sort_values('date')
+            fig.add_trace(go.Scatter(
+                x=dept_hist['date'],
+                y=dept_hist['actual_incidents'],
+                name=f'{dept} (actual)',
+                mode='lines+markers',
+                line=dict(width=2, dash='solid'),
+                marker=dict(size=6)
+            ))
+            
+            # Forecast
+            dept_forecast = transition_forecast[transition_forecast['department'] == dept].sort_values('date')
+            if len(dept_forecast) > 0:
+                fig.add_trace(go.Scatter(
+                    x=dept_forecast['date'],
+                    y=dept_forecast['incidents_forecast_rounded'],
+                    name=f'{dept} (prévision)',
+                    mode='lines',
+                    line=dict(width=2, dash='dash'),
+                    opacity=0.7
+                ))
+
+
+        fig.update_layout(
+            title="Historique réel vs Prévisions",
+            xaxis_title="Date",
+            yaxis_title="Nombre de tickets",
+            hovermode='x unified',
+            height=500,
+            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+        )
+
+        fig.show()
+  - cellType: SQL
+    cellId: 019b28ab-3b5c-7cca-a2f4-a7d0200808c6 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: null
+    config:
+      source: |
+        -- Cell SQL : périodes de hausse/pointes cohérentes avec l'arrondi
+        WITH params AS (
+          SELECT 1.0 AS std_coeff, 0.10 AS eps
+        ),
+        stats AS (
+          SELECT
+            department,
+            AVG(incidents_forecast)         AS mean_forecast,
+            STDDEV_SAMP(incidents_forecast) AS std_forecast
+          FROM forecast_24m_dept
+          GROUP BY department
+        ),
+        series AS (
+          SELECT
+            f.department,
+            f.date,
+            f.period_label,
+            f.incidents_forecast,
+            GREATEST(f.incidents_forecast_rounded, 0) AS tickets_approx,
+            s.mean_forecast,
+            s.std_forecast,
+            (f.incidents_forecast
+             - LAG(f.incidents_forecast) OVER (PARTITION BY f.department ORDER BY f.date)
+            ) AS delta_mom,
+            (GREATEST(f.incidents_forecast_rounded, 0)
+             - GREATEST(LAG(f.incidents_forecast_rounded) OVER (PARTITION BY f.department ORDER BY f.date), 0)
+            ) AS delta_mom_rounded,
+            LAG(f.incidents_forecast)  OVER (PARTITION BY f.department ORDER BY f.date) AS prev_val,
+            LEAD(f.incidents_forecast) OVER (PARTITION BY f.department ORDER BY f.date) AS next_val,
+            GREATEST(LAG(f.incidents_forecast_rounded) OVER (PARTITION BY f.department ORDER BY f.date), 0) AS prev_rounded,
+            GREATEST(LEAD(f.incidents_forecast_rounded) OVER (PARTITION BY f.department ORDER BY f.date), 0) AS next_rounded
+          FROM forecast_24m_dept AS f
+          JOIN stats AS s ON s.department = f.department
+        ),
+        flags AS (
+          SELECT
+            department,
+            date,
+            period_label,
+            tickets_approx,
+            CASE
+              WHEN COALESCE(delta_mom, 0) > (SELECT eps FROM params)
+               AND COALESCE(delta_mom_rounded, 0) > 0
+              THEN TRUE ELSE FALSE
+            END AS is_rise,
+            CASE
+              WHEN incidents_forecast >= (mean_forecast + (SELECT std_coeff FROM params)*COALESCE(std_forecast, 0))
+              THEN TRUE ELSE FALSE
+            END AS is_peak_std,
+            CASE
+              WHEN prev_val IS NOT NULL AND next_val IS NOT NULL
+               AND incidents_forecast >= prev_val
+               AND incidents_forecast >= next_val
+               AND tickets_approx >= GREATEST(prev_rounded, next_rounded)
+              THEN TRUE ELSE FALSE
+            END AS is_peak_local
+          FROM series
+        ),
+        future_flags AS (
+          SELECT *
+          FROM flags
+          WHERE date >= CURRENT_DATE
+        )
+        SELECT
+          department,
+          period_label,
+          tickets_approx,
+          CONCAT_WS(
+            ', ',
+            CASE WHEN is_rise       THEN 'hausse'       END,
+            CASE WHEN is_peak_std   THEN 'pointe_std'   END,
+            CASE WHEN is_peak_local THEN 'pointe_local' END
+          ) AS raisons
+        FROM future_flags
+        WHERE (is_rise = TRUE OR is_peak_std = TRUE OR is_peak_local = TRUE)
+        ORDER BY department, period_label
+      dataFrameCell: true
+      dataConnectionId: null
+      resultVariableName: dataframe_2
+      useRichDisplay: true
+      enablePreview: true
+      sqlCellOutputType: PANDAS
+      useQueryMode: false
+      castDecimals: true
+      useNativeDates: true
+      outputFilteredResult: true
+      allowDuplicateColumns: false
+      tableDisplayConfig:
+        pageSize: 50
+        height: null
+        hideIcons: false
+        defaultColumnWidth: null
+        hideIndex: false
+        defaultSortColumn: null
+        defaultSortIndexColumn: null
+        defaultSortDirection: ASC
+        conditionalFormatting: null
+        calcs: null
+        filters: null
+        columnProperties:
+          - originalName: department
+            renameTo: null
+            size: 127
+            wrapText: null
+            displayFormat: null
+          - originalName: period_label
+            renameTo: null
+            size: 120
+            wrapText: null
+            displayFormat: null
+          - originalName: raisons
+            renameTo: null
+            size: 205
+            wrapText: null
+            displayFormat: null
+          - originalName: row-index-0
+            renameTo: null
+            size: 46
+            wrapText: null
+            displayFormat: null
+          - originalName: tickets_approx
+            renameTo: null
+            size: 131
+            wrapText: null
+            displayFormat: null
+        columnOrdering: null
+        customColumnOrdering: null
+        pinnedColumns: null
+        hiddenColumns: null
+        pinIndexColumns: false
+        showAggregations: false
+        columnAggregations: null
+  - cellType: CODE
+    cellId: 019bfcc2-0f42-700d-95a8-3fb285fae382 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Filter peaks by departments
+    config:
+      source: filtered_peaks = dataframe_2[dataframe_2['department'].isin(selected_departments)].copy()
+  - cellType: EXPLORE
+    cellId: 019bfcc6-f4af-700b-8d59-d225724b9798 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Périodes de pointe - Alertes
+    config:
+      semanticProjectId: null
+      dataframe: filtered_peaks
+      colorMappings: {}
+      spec:
+        fields:
+          - id: 019bfcc6-f4a1-700b-8d59-949984489632
+            sort:
+              mode: measure-descending
+              measureOrder:
+                measureId: 019bfcc6-f4a3-700b-8d59-a1bb657f057e
+            value: department
+            channel: row
+            dataType: VARCHAR
+            seriesId: 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+            fieldType: DIMENSION
+            queryPath: []
+          - id: 019bfcc6-f4a2-700b-8d59-9b3f92e18301
+            sort:
+              mode: measure-descending
+              measureOrder:
+                measureId: 019bfcc6-f4a3-700b-8d59-a1bb657f057e
+            value: period_label
+            channel: row
+            dataType: VARCHAR
+            seriesId: 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+            fieldType: DIMENSION
+            queryPath: []
+          - id: 019bfcc6-f4a3-700b-8d59-a1bb657f057e
+            sort:
+              mode: value-descending
+            value: tickets_approx
+            channel: value
+            dataType: FLOAT
+            seriesId: 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+            fieldType: DIMENSION
+            queryPath: []
+            aggregation: Sum
+          - id: 019bfcc6-f4a3-700b-8d59-ac98fd4aabec
+            value: raisons
+            channel: value
+            dataType: VARCHAR
+            seriesId: 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+            fieldType: DIMENSION
+            queryPath: []
+            aggregation: Count
+        details:
+          fields:
+            - value: department
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+            - value: period_label
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+            - value: tickets_approx
+              dataType: FLOAT
+              fieldType: DIMENSION
+              queryPath: []
+            - value: raisons
+              dataType: VARCHAR
+              fieldType: DIMENSION
+              queryPath: []
+          enabled: false
+          showAllBaseTableDetailFields: true
+        viewType: visualization
+        rowTotals: true
+        chartConfig:
+          series:
+            - id: 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+              type: bar
+          settings:
+            legend:
+              position: right
+          orientation: vertical
+          seriesGroups:
+            - - 019bfcc6-f4a0-700b-8d59-8bbf8473fd7f
+        columnTotals: true
+        rowSubtotals: true
+        columnSubtotals: true
+        visualizationType: pivot-table
+      displayTableConfig:
+        pageSize: 50
+        height: null
+        hideIcons: false
+        defaultColumnWidth: null
+        hideIndex: false
+        defaultSortColumn: tickets_approx_sum
+        defaultSortIndexColumn: null
+        defaultSortDirection: DESC
+        conditionalFormatting: null
+        calcs: null
+        filters: null
+        columnProperties: []
+        columnOrdering: null
+        customColumnOrdering: null
+        pinnedColumns: null
+        hiddenColumns: null
+        pinIndexColumns: false
+        showAggregations: false
+        columnAggregations: null
+      resultVariables:
+        - pivot_result
+      resultIncludeDetailColumns: false
+      height: null
+  - cellType: SQL
+    cellId: 019b04c6-fe97-7006-ae61-12312503c21e # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: SQL
+    config:
+      source: |-
+        -- Export forecast_24m_dept pour SQL (HEX/BI)
+        SELECT * FROM forecast_24m_dept
+      dataFrameCell: true
+      dataConnectionId: null
+      resultVariableName: dataframe
+      useRichDisplay: true
+      enablePreview: true
+      sqlCellOutputType: PANDAS
+      useQueryMode: false
+      castDecimals: true
+      useNativeDates: true
+      outputFilteredResult: true
+      allowDuplicateColumns: false
+      tableDisplayConfig:
+        pageSize: 50
+        height: 611
+        hideIcons: false
+        defaultColumnWidth: null
+        hideIndex: false
+        defaultSortColumn: null
+        defaultSortIndexColumn: null
+        defaultSortDirection: ASC
+        conditionalFormatting: null
+        calcs: null
+        filters: null
+        columnProperties:
+          - originalName: date
+            renameTo: null
+            size: 156
+            wrapText: null
+            displayFormat: null
+          - originalName: department
+            renameTo: null
+            size: 127
+            wrapText: null
+            displayFormat: null
+          - originalName: incidents_forecast
+            renameTo: null
+            size: 165
+            wrapText: null
+            displayFormat: null
+          - originalName: incidents_forecast_rounded
+            renameTo: null
+            size: 203
+            wrapText: null
+            displayFormat: null
+          - originalName: lower_bound
+            renameTo: null
+            size: 165
+            wrapText: null
+            displayFormat: null
+          - originalName: period_label
+            renameTo: null
+            size: 120
+            wrapText: null
+            displayFormat: null
+          - originalName: raisons
+            renameTo: null
+            size: 205
+            wrapText: null
+            displayFormat: null
+          - originalName: row-index-0
+            renameTo: null
+            size: 46
+            wrapText: null
+            displayFormat: null
+          - originalName: tickets_approx
+            renameTo: null
+            size: 131
+            wrapText: null
+            displayFormat: null
+          - originalName: upper_bound
+            renameTo: null
+            size: 165
+            wrapText: null
+            displayFormat: null
+        columnOrdering: null
+        customColumnOrdering: null
+        pinnedColumns: null
+        hiddenColumns: []
+        pinIndexColumns: false
+        showAggregations: false
+        columnAggregations: null
+  - cellType: CODE
+    cellId: 019bfccb-1c10-700e-8128-45c864258033 # DO NOT CHANGE - Hex uses this to match up cells when reimporting the file, and detect any changes to existing cells
+    cellLabel: Export forecast data
+    config:
+      source: |-
+        import pandas as pd
+        from datetime import datetime
+
+        # Export forecast data with confidence intervals
+        export_filename = f"forecast_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        # Merge forecast with confidence intervals
+        export_data = forecast_with_ci[['department', 'date', 'incidents_forecast_rounded', 
+                                          'lower_bound', 'upper_bound', 'period_label']].copy()
+        export_data.columns = ['Département', 'Date', 'Prévision', 'Limite inférieure (80%)', 
+                               'Limite supérieure (80%)', 'Période']
+
+        # Add threshold violations if threshold is set
+        if capacity_threshold and capacity_threshold > 0:
+            export_data['Dépasse seuil'] = export_data['Prévision'] > capacity_threshold
+        else:
+            export_data['Dépasse seuil'] = False
+
+        export_data.to_csv(export_filename, index=False)
+        print(f"✅ Prévisions exportées: {export_filename}")
+        print(f"   - {len(export_data)} lignes")
+        print(f"   - Départements: {export_data['Département'].nunique()}")
+        print(f"   - Période: {export_data['Date'].min().strftime('%Y-%m-%d')} à {export_data['Date'].max().strftime('%Y-%m-%d')}")
+appLayout:
+  visibleMetadataFields:
+    - NAME
+    - DESCRIPTION
+    - AUTHOR
+    - LAST_EDITED
+    - LAST_RUN
+    - CATEGORIES
+    - STATUS
+    - TABLE_OF_CONTENTS
+  fullWidth: false
+  tabs:
+    - name: Tab 1
+      rows:
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc0-d475-700f-87b7-75b2e66c8641
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc4-ae7d-700b-b49c-9a4c72599978
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc8-8c3c-7118-99cb-d5341fc0147a
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc6-a4b1-766e-8cc1-58008a14cb0c
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc6-9f3b-7ccf-9b82-3eafc61a4d97
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019b28aa-5141-7cca-a2f3-ff0866c7de70
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019b04c6-fe97-7006-ae61-12312503c21e
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc9-0e6f-7aa3-9d5a-35b0264bc0aa
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 60
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcc6-f4af-700b-8d59-d225724b9798
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfcca-7938-700a-b71f-0021310ff5b2
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+        - columns:
+            - start: 0
+              end: 120
+              elements:
+                - showSource: false
+                  hideOutput: false
+                  type: CELL
+                  cellId: 019bfccb-f324-700d-82fb-f3698934cbaa
+                  sharedFilterId: null
+                  height: null
+                  showLabel: true
+                  explorable: null
+sharedFilters: []
