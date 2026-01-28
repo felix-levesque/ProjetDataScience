@@ -1,0 +1,58 @@
+DOCUMENT EXPLICATIF – Projet en Science des Données
+
+1. Introduction et objectif général
+
+Le projet vise à anticiper les volumes d’incidents par département afin de soutenir la planification capacitaire et améliorer la répartition des équipes de support. L’objectif était de construire un pipeline complet dans Hex, allant de la préparation des données à la modélisation et à la visualisation des prévisions.
+
+2. Traitement et préparation des données
+
+Les données initiales présentaient des incohérences, des formats hétérogènes et des champs manquants. Les étapes clés du nettoyage ont inclu :
+- La normalisation des colonnes en snake_case.
+- Le parsing des dates (created, resolved, closed).
+- L'harmonisation des états (closed_complete, canceled, etc.).
+- L'extraction du niveau d’urgence depuis priority.
+- Le parsing robuste des durées (formats h:mm, hr, min, valeurs numériques).
+- La neutralisation des durées incohérentes (TTR/TTC négatifs).
+- La déduplication sur number en conservant la version la plus récente.
+- Le filtrage des incidents via task_type et numéro INC.
+
+3. Structuration des données
+
+Les incidents ont été convertis en séries temporelles mensuelles par département à l’aide de resample('MS') et asfreq('MS', fill_value=0). Cette granularité mensuelle est essentielle pour la planification capacitaire et la détection de saisons.
+
+4. Modélisation prédictive
+
+Un modèle par département a été retenu afin de respecter les particularités locales.
+- Holt-Winters (ETS additif) lorsque l’historique >= 24 mois.
+- Holt (tendance seule) pour les séries courtes.
+Les prévisions sont faites sur un horizon de 24 mois, avec intervalles de confiance à 80 % lorsque disponibles. Lorsque les intervalles ne pouvaient être calculés, des bandes ±20 % étaient appliquées. Les valeurs prédites ont été arrondies pour correspondre au format attendu (nombre de tickets).
+
+5. Détection des hausses et des pics (SQL)
+
+Une table SQL a été construite pour détecter trois types d’événements :
+- Hausses (Delta MoM continu > epsilon et Delta arrondi > 0).
+- Pointes statistiques (>= moyenne + k * écart-type).
+- Pointes locales (valeurs supérieures aux voisins tout en restant cohérentes avec les valeurs arrondies).
+Cette table permet de repérer rapidement les périodes de tension à venir.
+
+6. Visualisations interactives Hex
+
+Les visualisations ont été construites dans Hex pour faciliter l’interprétation :
+- Courbes Plotly multi-séries sur 24 mois.
+- Overlay historique vs prévision.
+- Tableau comparatif (total des tickets prévus + mois de pointe par département).
+- KPIs (moyenne mensuelle, total prévisions).
+- Ligne de seuil de capacité.
+Les utilisateurs peuvent interagir avec l’outil via des sélections de départements, une plage temporelle et un seuil de capacité.
+
+7. Décision après le rapport de mi-parcours
+
+Une version préliminaire incluait une exportation vers Power BI pour créer des tableaux de bord additionnels. Après la remise du rapport de mi-parcours (16 décembre 2025), la décision a été prise d’abandonner Power BI pour concentrer le projet dans une plateforme unique : Hex. Cela a simplifié l’architecture, accéléré la livraison du produit final et évité la duplication des visuels. Des fichiers CSV sont néanmoins disponibles pour un usage ponctuel.
+
+8. Interprétation des résultats
+
+Les prévisions indiquent des tendances claires, avec saisonnalité dans certains départements et simple tendance dans d’autres. La table SQL permet d’identifier les périodes critiques (hausses rapides, pics statistiques ou locaux). L’usage du seuil de capacité aide à anticiper les dépassements et planifier les équipes en conséquence.
+
+9. Conclusion
+
+Le projet a permis d’obtenir un pipeline robuste, reproductible et interprétable. L’approche Hex (Python + SQL + visualisations interactives) a permis de rassembler modèles, données et analyses dans une solution unique. Le retrait de l’option Power BI a renforcé la cohérence de la plateforme. Le produit final permet une planification proactive des ressources et constitue une base fiable pour un futur système prédictif automatisé.
